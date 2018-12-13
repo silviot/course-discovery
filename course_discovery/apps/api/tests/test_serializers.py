@@ -1367,10 +1367,6 @@ class PersonSerializerTests(MinimalPersonSerializerTests):
     def setUp(self):
         super().setUp()
         self.serializer = PersonSerializer
-        self.expected.update({
-            'course_runs_staffed': [],
-            'publisher_course_runs_staffed': [],
-        })
 
 
 class PositionSerializerTests(TestCase):
