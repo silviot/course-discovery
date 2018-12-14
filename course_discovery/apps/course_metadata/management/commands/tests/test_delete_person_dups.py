@@ -1,3 +1,4 @@
+import ddt
 import mock
 
 from django.core.exceptions import ValidationError
@@ -12,6 +13,7 @@ from course_discovery.apps.publisher.models import CourseRun as PublisherCourseR
 from course_discovery.apps.publisher.tests import factories as publisher_factories
 
 
+@ddt.ddt
 class DeletePersonDupsCommandTests(TestCase):
     def setUp(self):
         super().setUp()
@@ -44,13 +46,19 @@ class DeletePersonDupsCommandTests(TestCase):
             self.instructor1, self.instructor2, self.instructor3, self.person,
         ])
 
-    def run_command(self, people=None, commit=True):
+    def run_command(self, people=None, commit=True, delete_only=False):
         command_args = ['--partner-code=' + self.partner.short_code]
         if commit:
             command_args.append('--commit')
-        if people is None:
-            people = [(self.person, self.target)]
-        command_args += [str(a.uuid) + ':' + str(b.uuid) for (a, b) in people]
+        if delete_only:
+            command_args.append('--delete-only=true')
+            if people is None:
+                people = [self.person]
+            command_args += [str(person.uuid) for person in people]
+        else:
+            if people is None:
+                people = [(self.person, self.target)]
+            command_args += [str(a.uuid) + ':' + str(b.uuid) for (a, b) in people]
         self.call_command(*command_args)
 
     def call_command(self, *args):
@@ -85,8 +93,9 @@ class DeletePersonDupsCommandTests(TestCase):
         with self.assertRaises(Person.DoesNotExist):
             self.call_command(partner_code, '00000000-0000-0000-0000-000000000000:00000000-0000-0000-0000-000000000001')
 
-    def test_non_committal_run(self):
-        self.run_command(commit=False)
+    @ddt.data(False, True)
+    def test_non_committal_run(self, delete_only):
+        self.run_command(commit=False, delete_only=delete_only)
 
         # Now everything in the db should be the same (still exist)
         Person.objects.get(uuid=self.person.uuid)  # will raise if it doesn't exist
@@ -94,18 +103,20 @@ class DeletePersonDupsCommandTests(TestCase):
         # Spot check one course run just to feel a little more confident
         self.assertEqual(CourseRun.objects.get(id=self.courserun1.id).staff, self.courserun1.staff)
 
-    def test_remove_from_marketing(self):
+    @ddt.data(False, True)
+    def test_remove_from_marketing(self, delete_only):
         method = 'course_discovery.apps.course_metadata.people.MarketingSitePeople.delete_person_by_uuid'
 
         with mock.patch(method) as cm:
-            self.run_command()
+            self.run_command(delete_only=delete_only)
         self.assertEqual(cm.call_count, 1)
         args = cm.call_args[0]
         self.assertEqual(args[0], self.person.partner)
         self.assertEqual(args[1], self.person.uuid)
 
-    def test_normal_run(self):
-        self.run_command()
+    @ddt.data(False, True)
+    def test_normal_run(self, delete_only):
+        self.run_command(delete_only=delete_only)
 
         # Straight deleted
         self.assertEqual(Person.objects.filter(id=self.person.id).count(), 0)
@@ -113,23 +124,24 @@ class DeletePersonDupsCommandTests(TestCase):
         self.assertEqual(PersonSocialNetwork.objects.filter(id=self.social1.id).count(), 0)
         self.assertEqual(PersonSocialNetwork.objects.filter(id=self.social2.id).count(), 0)
 
-        # Migrated
-        self.assertEqual(Endorsement.objects.get(id=self.endorsement.id).endorser, self.target)
-        self.assertListEqual(list(CourseRun.objects.get(id=self.courserun1.id).staff.all()), [
-            self.instructor1, self.target, self.instructor2, self.instructor3,
-        ])
-        self.assertListEqual(list(CourseRun.objects.get(id=self.courserun2.id).staff.all()), [
-            self.instructor1, self.instructor2, self.target, self.instructor3,
-        ])
-        self.assertListEqual(list(Program.objects.get(id=self.program.id).instructor_ordering.all()), [
-            self.target, self.instructor1, self.instructor2, self.instructor3,
-        ])
-        self.assertListEqual(list(PublisherCourseRun.objects.get(id=self.publisher_courserun1.id).staff.all()), [
-            self.target, self.instructor1, self.instructor2, self.instructor3,
-        ])
-        self.assertListEqual(list(PublisherCourseRun.objects.get(id=self.publisher_courserun2.id).staff.all()), [
-            self.instructor1, self.instructor2, self.instructor3, self.target,
-        ])
+        if not delete_only:
+            # Migrated
+            self.assertEqual(Endorsement.objects.get(id=self.endorsement.id).endorser, self.target)
+            self.assertListEqual(list(CourseRun.objects.get(id=self.courserun1.id).staff.all()), [
+                self.instructor1, self.target, self.instructor2, self.instructor3,
+            ])
+            self.assertListEqual(list(CourseRun.objects.get(id=self.courserun2.id).staff.all()), [
+                self.instructor1, self.instructor2, self.target, self.instructor3,
+            ])
+            self.assertListEqual(list(Program.objects.get(id=self.program.id).instructor_ordering.all()), [
+                self.target, self.instructor1, self.instructor2, self.instructor3,
+            ])
+            self.assertListEqual(list(PublisherCourseRun.objects.get(id=self.publisher_courserun1.id).staff.all()), [
+                self.target, self.instructor1, self.instructor2, self.instructor3,
+            ])
+            self.assertListEqual(list(PublisherCourseRun.objects.get(id=self.publisher_courserun2.id).staff.all()), [
+                self.instructor1, self.instructor2, self.instructor3, self.target,
+            ])
 
     def test_target_already_present(self):
         # Change everything to include target. We expect that target's place isn't altered.
@@ -186,9 +198,25 @@ class DeletePersonDupsCommandTests(TestCase):
             self.instructor2, self.instructor3, self.target,
         ])
 
-    def test_args_from_database(self):
+    def test_multiple_people_with_delete_only(self):
+        self.run_command(
+            people=[self.person, self.target, self.instructor1, self.instructor2],
+            delete_only=True
+        )
+
+        # Straight deleted
+        self.assertEqual(Person.objects.filter(id=self.person.id).count(), 0)
+        self.assertEqual(Person.objects.filter(id=self.instructor1.id).count(), 0)
+        self.assertEqual(Position.objects.filter(id=self.position.id).count(), 0)
+        self.assertEqual(PersonSocialNetwork.objects.filter(id=self.social1.id).count(), 0)
+        self.assertEqual(PersonSocialNetwork.objects.filter(id=self.social2.id).count(), 0)
+        self.assertEqual(Person.objects.filter(id=self.target.id).count(), 0)
+        self.assertEqual(Person.objects.filter(id=self.instructor2.id).count(), 0)
+
+    @ddt.data('false', 'true')
+    def test_args_from_database(self, delete_only):
         config = DeletePersonDupsConfig.get_solo()
-        config.arguments = '--partner-code=a a:b --commit'
+        config.arguments = '--partner-code=a a:b --commit --delete-only=' + delete_only
         config.save()
 
         module = 'course_discovery.apps.course_metadata.management.commands.delete_person_dups'
@@ -201,6 +229,7 @@ class DeletePersonDupsCommandTests(TestCase):
         self.assertEqual(args['partner_code'], 'a')
         self.assertEqual(args['commit'], True)
         self.assertEqual(args['people'], ['a:b'])
+        self.assertEqual(args['delete_only'], str(delete_only))
 
         # Then confirm that we don't when not asked to
         with mock.patch(module + '.Command.delete_person_dups') as cm:
