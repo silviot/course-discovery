@@ -1,11 +1,10 @@
-from collections import Counter
 import json
-
-from haystack import indexes
-from opaque_keys.edx.keys import CourseKey
+from collections import Counter
 
 from course_discovery.apps.course_metadata.choices import CourseRunStatus, ProgramStatus
 from course_discovery.apps.course_metadata.models import Course, CourseRun, Degree, Person, Position, Program
+from haystack import indexes
+from opaque_keys.edx.keys import CourseKey
 
 BASE_SEARCH_INDEX_FIELDS = (
     'aggregation_key',
