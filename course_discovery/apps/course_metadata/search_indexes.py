@@ -316,7 +316,9 @@ class ProgramIndex(BaseIndex, indexes.Indexable, OrganizationsMixin):
         return self.prepare_authoring_organizations(obj) + self.prepare_credit_backing_organizations(obj)
 
     def prepare_subject_uuids(self, obj):
-        course_subjects = [str(subject.uuid) for course in obj.courses.all() for subject in course.subjects.all()]
+        course_subjects = []
+        for course in obj.courses.all():
+            course_subjects.extend([str(subject.uuid) for subject in course.subjects.all()])
         counted_subjects = Counter(course_subjects)
         return [uuid for uuid, _ in counted_subjects.most_common()]
 
